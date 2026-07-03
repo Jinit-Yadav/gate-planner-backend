@@ -25,20 +25,17 @@ db.once('open', () => console.log('✅ Connected to MongoDB Atlas!'));
 // SCHEMAS
 // ============================================================
 
-// 1. Planner Schema (existing)
+// 1. Planner Schema
 const plannerSchema = new mongoose.Schema({
-    userId: { type: String, unique: true, default: 'gate_planner_user' },
+    userId: { type: String, default: 'default_user' },
     ticks: { type: Object, required: true },
     history: { type: Object, default: {} },
     snapshots: { type: Array, default: [] },
     lastUpdated: { type: Date, default: Date.now }
 });
 
-const Planner = mongoose.model('Planner', plannerSchema);
-
 // 2. Mistake Schema
 const mistakeSchema = new mongoose.Schema({
-    userId: { type: String, required: true },
     question: { type: String, required: true },
     options: { type: [String], required: true },
     correct: { type: String, required: true },
@@ -54,29 +51,28 @@ const mistakeSchema = new mongoose.Schema({
     revisionCount: { type: Number, default: 0 }
 });
 
-const Mistake = mongoose.model('Mistake', mistakeSchema);
-
-// 3. Tracker Schema (NEW)
+// 3. Tracker Schema
 const trackerSchema = new mongoose.Schema({
-    userId: { type: String, required: true, unique: true },
     progress: { type: Object, default: {} },
     today: { type: Object, default: {} },
     streak: { type: Object, default: { lastDate: null, streak: 0 } },
     lastUpdated: { type: Date, default: Date.now }
 });
 
+const Planner = mongoose.model('Planner', plannerSchema);
+const Mistake = mongoose.model('Mistake', mistakeSchema);
 const Tracker = mongoose.model('Tracker', trackerSchema);
 
 // ============================================================
-// ROUTES - PLANNER (existing)
+// ROUTES - PLANNER
 // ============================================================
 // GET planner data
-app.get('/api/planner/:userId', async (req, res) => {
+app.get('/api/planner', async (req, res) => {
     try {
-        let data = await Planner.findOne({ userId: req.params.userId });
+        let data = await Planner.findOne({ userId: 'default_user' });
         if (!data) {
             data = new Planner({ 
-                userId: req.params.userId, 
+                userId: 'default_user',
                 ticks: {},
                 history: {},
                 snapshots: []
@@ -93,9 +89,9 @@ app.get('/api/planner/:userId', async (req, res) => {
 // POST/UPDATE planner data
 app.post('/api/planner', async (req, res) => {
     try {
-        const { userId, ticks, history, snapshots } = req.body;
+        const { ticks, history, snapshots } = req.body;
         const updated = await Planner.findOneAndUpdate(
-            { userId },
+            { userId: 'default_user' },
             { 
                 ticks, 
                 history, 
@@ -112,10 +108,10 @@ app.post('/api/planner', async (req, res) => {
 });
 
 // DELETE - Reset all ticks
-app.delete('/api/planner/:userId', async (req, res) => {
+app.delete('/api/planner', async (req, res) => {
     try {
         const updated = await Planner.findOneAndUpdate(
-            { userId: req.params.userId },
+            { userId: 'default_user' },
             { 
                 ticks: {},
                 history: {},
@@ -135,11 +131,10 @@ app.delete('/api/planner/:userId', async (req, res) => {
 // ROUTES - MISTAKES
 // ============================================================
 
-// GET all mistakes for a user
-app.get('/api/mistakes/:userId', async (req, res) => {
+// GET all mistakes
+app.get('/api/mistakes', async (req, res) => {
     try {
-        const mistakes = await Mistake.find({ userId: req.params.userId })
-            .sort({ createdAt: -1 });
+        const mistakes = await Mistake.find().sort({ createdAt: -1 });
         res.json(mistakes);
     } catch (error) {
         console.error('GET Mistakes Error:', error);
@@ -148,12 +143,9 @@ app.get('/api/mistakes/:userId', async (req, res) => {
 });
 
 // GET a single mistake
-app.get('/api/mistakes/:userId/:id', async (req, res) => {
+app.get('/api/mistakes/:id', async (req, res) => {
     try {
-        const mistake = await Mistake.findOne({ 
-            _id: req.params.id, 
-            userId: req.params.userId 
-        });
+        const mistake = await Mistake.findById(req.params.id);
         if (!mistake) {
             return res.status(404).json({ error: 'Mistake not found' });
         }
@@ -231,9 +223,9 @@ app.patch('/api/mistakes/:id/revision', async (req, res) => {
 });
 
 // GET analytics for mistakes
-app.get('/api/mistakes/:userId/analytics', async (req, res) => {
+app.get('/api/mistakes/analytics', async (req, res) => {
     try {
-        const mistakes = await Mistake.find({ userId: req.params.userId });
+        const mistakes = await Mistake.find();
         
         const analytics = {
             total: mistakes.length,
@@ -258,16 +250,15 @@ app.get('/api/mistakes/:userId/analytics', async (req, res) => {
 });
 
 // ============================================================
-// ROUTES - TRACKER (NEW)
+// ROUTES - TRACKER (NO USERID)
 // ============================================================
 
-// GET tracker data for a user
-app.get('/api/tracker/:userId', async (req, res) => {
+// GET tracker data
+app.get('/api/tracker', async (req, res) => {
     try {
-        let data = await Tracker.findOne({ userId: req.params.userId });
+        let data = await Tracker.findOne();
         if (!data) {
-            data = new Tracker({ 
-                userId: req.params.userId,
+            data = new Tracker({
                 progress: {},
                 today: {},
                 streak: { lastDate: null, streak: 0 }
@@ -284,18 +275,21 @@ app.get('/api/tracker/:userId', async (req, res) => {
 // POST/UPDATE tracker data
 app.post('/api/tracker', async (req, res) => {
     try {
-        const { userId, progress, today, streak } = req.body;
-        const updated = await Tracker.findOneAndUpdate(
-            { userId },
-            { 
-                progress, 
-                today, 
-                streak,
-                lastUpdated: new Date() 
-            },
-            { upsert: true, new: true }
-        );
-        res.json(updated);
+        const { progress, today, streak } = req.body;
+        
+        // Find existing or create new
+        let tracker = await Tracker.findOne();
+        if (!tracker) {
+            tracker = new Tracker({ progress, today, streak });
+        } else {
+            tracker.progress = progress || tracker.progress;
+            tracker.today = today || tracker.today;
+            tracker.streak = streak || tracker.streak;
+            tracker.lastUpdated = new Date();
+        }
+        
+        await tracker.save();
+        res.json(tracker);
     } catch (error) {
         console.error('POST Tracker Error:', error);
         res.status(500).json({ error: error.message });
@@ -303,19 +297,23 @@ app.post('/api/tracker', async (req, res) => {
 });
 
 // DELETE - Reset all tracker progress
-app.delete('/api/tracker/:userId', async (req, res) => {
+app.delete('/api/tracker', async (req, res) => {
     try {
-        const updated = await Tracker.findOneAndUpdate(
-            { userId: req.params.userId },
-            { 
+        let tracker = await Tracker.findOne();
+        if (!tracker) {
+            tracker = new Tracker({
                 progress: {},
                 today: {},
-                streak: { lastDate: null, streak: 0 },
-                lastUpdated: new Date() 
-            },
-            { new: true }
-        );
-        res.json(updated);
+                streak: { lastDate: null, streak: 0 }
+            });
+        } else {
+            tracker.progress = {};
+            tracker.today = {};
+            tracker.streak = { lastDate: null, streak: 0 };
+            tracker.lastUpdated = new Date();
+        }
+        await tracker.save();
+        res.json(tracker);
     } catch (error) {
         console.error('DELETE Tracker Error:', error);
         res.status(500).json({ error: error.message });
@@ -336,21 +334,21 @@ app.get('/', (req, res) => {
         endpoints: {
             health: '/api/health',
             planner: {
-                get: '/api/planner/:userId',
+                get: '/api/planner',
                 post: '/api/planner',
-                delete: '/api/planner/:userId'
+                delete: '/api/planner'
             },
             mistakes: {
-                get: '/api/mistakes/:userId',
+                get: '/api/mistakes',
                 post: '/api/mistakes',
                 delete: '/api/mistakes/:id',
                 revision: '/api/mistakes/:id/revision',
-                analytics: '/api/mistakes/:userId/analytics'
+                analytics: '/api/mistakes/analytics'
             },
             tracker: {
-                get: '/api/tracker/:userId',
+                get: '/api/tracker',
                 post: '/api/tracker',
-                delete: '/api/tracker/:userId'
+                delete: '/api/tracker'
             }
         }
     });
