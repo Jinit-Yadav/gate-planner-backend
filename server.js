@@ -64,8 +64,9 @@ const Mistake = mongoose.model('Mistake', mistakeSchema);
 const Tracker = mongoose.model('Tracker', trackerSchema);
 
 // ============================================================
-// ROUTES - PLANNER
+// ROUTES - PLANNER (FIXED - removed userId dependency)
 // ============================================================
+
 // GET planner data
 app.get('/api/planner', async (req, res) => {
     try {
@@ -93,9 +94,9 @@ app.post('/api/planner', async (req, res) => {
         const updated = await Planner.findOneAndUpdate(
             { userId: 'default_user' },
             { 
-                ticks, 
-                history, 
-                snapshots, 
+                ticks: ticks || {},
+                history: history || {},
+                snapshots: snapshots || [],
                 lastUpdated: new Date() 
             },
             { upsert: true, new: true }
@@ -128,7 +129,7 @@ app.delete('/api/planner', async (req, res) => {
 });
 
 // ============================================================
-// ROUTES - MISTAKES
+// ROUTES - MISTAKES (FIXED - removed userId dependency)
 // ============================================================
 
 // GET all mistakes
@@ -277,7 +278,6 @@ app.post('/api/tracker', async (req, res) => {
     try {
         const { progress, today, streak } = req.body;
         
-        // Find existing or create new
         let tracker = await Tracker.findOne();
         if (!tracker) {
             tracker = new Tracker({ progress, today, streak });
