@@ -22,8 +22,10 @@ db.on('error', console.error.bind(console, '❌ Connection error:'));
 db.once('open', () => console.log('✅ Connected to MongoDB Atlas!'));
 
 // ============================================================
-// SCHEMA
+// SCHEMAS
 // ============================================================
+
+// 1. Planner Schema (existing)
 const plannerSchema = new mongoose.Schema({
     userId: { type: String, unique: true, default: 'gate_planner_user' },
     ticks: { type: Object, required: true },
@@ -34,8 +36,39 @@ const plannerSchema = new mongoose.Schema({
 
 const Planner = mongoose.model('Planner', plannerSchema);
 
+// 2. Mistake Schema
+const mistakeSchema = new mongoose.Schema({
+    userId: { type: String, required: true },
+    question: { type: String, required: true },
+    options: { type: [String], required: true },
+    correct: { type: String, required: true },
+    userAnswer: { type: String, required: true },
+    subject: { type: String, required: true },
+    difficulty: { type: String, enum: ['Easy', 'Medium', 'Hard'], required: true },
+    reason: { type: String, enum: ['Concept Error', 'Calculation Error', 'Guess', 'Silly Mistake', 'Time Pressure'], required: true },
+    aiFeedback: { type: String, default: '' },
+    memoryTrick: { type: String, default: '' },
+    isRevised: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
+    revisedAt: { type: Date },
+    revisionCount: { type: Number, default: 0 }
+});
+
+const Mistake = mongoose.model('Mistake', mistakeSchema);
+
+// 3. Tracker Schema (NEW)
+const trackerSchema = new mongoose.Schema({
+    userId: { type: String, required: true, unique: true },
+    progress: { type: Object, default: {} },
+    today: { type: Object, default: {} },
+    streak: { type: Object, default: { lastDate: null, streak: 0 } },
+    lastUpdated: { type: Date, default: Date.now }
+});
+
+const Tracker = mongoose.model('Tracker', trackerSchema);
+
 // ============================================================
-// ROUTES
+// ROUTES - PLANNER (existing)
 // ============================================================
 // GET planner data
 app.get('/api/planner/:userId', async (req, res) => {
@@ -98,25 +131,230 @@ app.delete('/api/planner/:userId', async (req, res) => {
     }
 });
 
-// Health check
+// ============================================================
+// ROUTES - MISTAKES
+// ============================================================
+
+// GET all mistakes for a user
+app.get('/api/mistakes/:userId', async (req, res) => {
+    try {
+        const mistakes = await Mistake.find({ userId: req.params.userId })
+            .sort({ createdAt: -1 });
+        res.json(mistakes);
+    } catch (error) {
+        console.error('GET Mistakes Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET a single mistake
+app.get('/api/mistakes/:userId/:id', async (req, res) => {
+    try {
+        const mistake = await Mistake.findOne({ 
+            _id: req.params.id, 
+            userId: req.params.userId 
+        });
+        if (!mistake) {
+            return res.status(404).json({ error: 'Mistake not found' });
+        }
+        res.json(mistake);
+    } catch (error) {
+        console.error('GET Mistake Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ADD a new mistake
+app.post('/api/mistakes', async (req, res) => {
+    try {
+        const mistake = new Mistake(req.body);
+        await mistake.save();
+        res.status(201).json(mistake);
+    } catch (error) {
+        console.error('POST Mistake Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// UPDATE a mistake
+app.put('/api/mistakes/:id', async (req, res) => {
+    try {
+        const mistake = await Mistake.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+        if (!mistake) {
+            return res.status(404).json({ error: 'Mistake not found' });
+        }
+        res.json(mistake);
+    } catch (error) {
+        console.error('PUT Mistake Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE a mistake
+app.delete('/api/mistakes/:id', async (req, res) => {
+    try {
+        const mistake = await Mistake.findByIdAndDelete(req.params.id);
+        if (!mistake) {
+            return res.status(404).json({ error: 'Mistake not found' });
+        }
+        res.json({ message: 'Mistake deleted successfully' });
+    } catch (error) {
+        console.error('DELETE Mistake Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// MARK as revised
+app.patch('/api/mistakes/:id/revision', async (req, res) => {
+    try {
+        const mistake = await Mistake.findByIdAndUpdate(
+            req.params.id,
+            { 
+                isRevised: true, 
+                revisedAt: new Date(),
+                $inc: { revisionCount: 1 }
+            },
+            { new: true }
+        );
+        if (!mistake) {
+            return res.status(404).json({ error: 'Mistake not found' });
+        }
+        res.json(mistake);
+    } catch (error) {
+        console.error('PATCH Mistake Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET analytics for mistakes
+app.get('/api/mistakes/:userId/analytics', async (req, res) => {
+    try {
+        const mistakes = await Mistake.find({ userId: req.params.userId });
+        
+        const analytics = {
+            total: mistakes.length,
+            bySubject: {},
+            byReason: {},
+            byDifficulty: { Easy: 0, Medium: 0, Hard: 0 },
+            revised: mistakes.filter(m => m.isRevised).length,
+            pending: mistakes.filter(m => !m.isRevised).length
+        };
+        
+        mistakes.forEach(m => {
+            analytics.bySubject[m.subject] = (analytics.bySubject[m.subject] || 0) + 1;
+            analytics.byReason[m.reason] = (analytics.byReason[m.reason] || 0) + 1;
+            analytics.byDifficulty[m.difficulty] = (analytics.byDifficulty[m.difficulty] || 0) + 1;
+        });
+        
+        res.json(analytics);
+    } catch (error) {
+        console.error('Analytics Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// ROUTES - TRACKER (NEW)
+// ============================================================
+
+// GET tracker data for a user
+app.get('/api/tracker/:userId', async (req, res) => {
+    try {
+        let data = await Tracker.findOne({ userId: req.params.userId });
+        if (!data) {
+            data = new Tracker({ 
+                userId: req.params.userId,
+                progress: {},
+                today: {},
+                streak: { lastDate: null, streak: 0 }
+            });
+            await data.save();
+        }
+        res.json(data);
+    } catch (error) {
+        console.error('GET Tracker Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST/UPDATE tracker data
+app.post('/api/tracker', async (req, res) => {
+    try {
+        const { userId, progress, today, streak } = req.body;
+        const updated = await Tracker.findOneAndUpdate(
+            { userId },
+            { 
+                progress, 
+                today, 
+                streak,
+                lastUpdated: new Date() 
+            },
+            { upsert: true, new: true }
+        );
+        res.json(updated);
+    } catch (error) {
+        console.error('POST Tracker Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE - Reset all tracker progress
+app.delete('/api/tracker/:userId', async (req, res) => {
+    try {
+        const updated = await Tracker.findOneAndUpdate(
+            { userId: req.params.userId },
+            { 
+                progress: {},
+                today: {},
+                streak: { lastDate: null, streak: 0 },
+                lastUpdated: new Date() 
+            },
+            { new: true }
+        );
+        res.json(updated);
+    } catch (error) {
+        console.error('DELETE Tracker Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// HEALTH CHECK
+// ============================================================
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Add this root route
+// Root route
 app.get('/', (req, res) => {
     res.json({ 
         message: '🚀 GATE Planner API is running!',
         endpoints: {
             health: '/api/health',
-            planner: '/api/planner/:userId',
-            update: 'POST /api/planner'
+            planner: {
+                get: '/api/planner/:userId',
+                post: '/api/planner',
+                delete: '/api/planner/:userId'
+            },
+            mistakes: {
+                get: '/api/mistakes/:userId',
+                post: '/api/mistakes',
+                delete: '/api/mistakes/:id',
+                revision: '/api/mistakes/:id/revision',
+                analytics: '/api/mistakes/:userId/analytics'
+            },
+            tracker: {
+                get: '/api/tracker/:userId',
+                post: '/api/tracker',
+                delete: '/api/tracker/:userId'
+            }
         }
     });
 });
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
