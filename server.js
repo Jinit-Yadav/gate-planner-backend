@@ -64,7 +64,7 @@ const Mistake = mongoose.model('Mistake', mistakeSchema);
 const Tracker = mongoose.model('Tracker', trackerSchema);
 
 // ============================================================
-// ROUTES - PLANNER (FIXED - removed userId dependency)
+// ROUTES - PLANNER
 // ============================================================
 
 // GET planner data
@@ -129,7 +129,7 @@ app.delete('/api/planner', async (req, res) => {
 });
 
 // ============================================================
-// ROUTES - MISTAKES (FIXED - removed userId dependency)
+// ROUTES - MISTAKES
 // ============================================================
 
 // GET all mistakes
@@ -251,7 +251,7 @@ app.get('/api/mistakes/analytics', async (req, res) => {
 });
 
 // ============================================================
-// ROUTES - TRACKER (NO USERID)
+// ROUTES - TRACKER ⭐ THIS IS WHAT WAS MISSING
 // ============================================================
 
 // GET tracker data
@@ -280,11 +280,15 @@ app.post('/api/tracker', async (req, res) => {
         
         let tracker = await Tracker.findOne();
         if (!tracker) {
-            tracker = new Tracker({ progress, today, streak });
+            tracker = new Tracker({ 
+                progress: progress || {},
+                today: today || {},
+                streak: streak || { lastDate: null, streak: 0 }
+            });
         } else {
-            tracker.progress = progress || tracker.progress;
-            tracker.today = today || tracker.today;
-            tracker.streak = streak || tracker.streak;
+            if (progress) tracker.progress = progress;
+            if (today) tracker.today = today;
+            if (streak) tracker.streak = streak;
             tracker.lastUpdated = new Date();
         }
         
@@ -324,7 +328,11 @@ app.delete('/api/tracker', async (req, res) => {
 // HEALTH CHECK
 // ============================================================
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'OK', timestamp: new Date().toISOString() });
+    res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        routes: ['/api/planner', '/api/tracker', '/api/mistakes']
+    });
 });
 
 // Root route
@@ -341,6 +349,8 @@ app.get('/', (req, res) => {
             mistakes: {
                 get: '/api/mistakes',
                 post: '/api/mistakes',
+                getOne: '/api/mistakes/:id',
+                put: '/api/mistakes/:id',
                 delete: '/api/mistakes/:id',
                 revision: '/api/mistakes/:id/revision',
                 analytics: '/api/mistakes/analytics'
@@ -354,5 +364,22 @@ app.get('/', (req, res) => {
     });
 });
 
+// ============================================================
+// ERROR HANDLING
+// ============================================================
+app.use((req, res) => {
+    res.status(404).json({ 
+        error: 'Route not found',
+        message: `Cannot ${req.method} ${req.url}`,
+        availableRoutes: ['/api/planner', '/api/tracker', '/api/mistakes', '/api/health']
+    });
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`📍 Planner: http://localhost:${PORT}/api/planner`);
+    console.log(`📍 Tracker: http://localhost:${PORT}/api/tracker`);
+    console.log(`📍 Mistakes: http://localhost:${PORT}/api/mistakes`);
+});
